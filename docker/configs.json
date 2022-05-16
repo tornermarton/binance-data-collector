@@ -1,0 +1,32 @@
+{
+  "buffers_root": "/data/buffers",
+  "compressed_root": "/data/compressed",
+  "depth": 1000,
+  "snapshot_frequency": 60,
+  "currency_pairs": [
+    {"base": "BTC", "quote": "USDT"},
+    {"base": "ETH", "quote": "USDT"},
+    {"base": "XMR", "quote": "USDT"},
+    {"base": "XRP", "quote": "USDT"},
+    {"base": "LTC", "quote": "USDT"},
+    {"base": "BCH", "quote": "USDT"},
+    {"base": "EOS", "quote": "USDT"},
+    {"base": "XLM", "quote": "USDT"},
+    {"base": "BNB", "quote": "USDT"},
+    {"base": "XTZ", "quote": "USDT"},
+    {"base": "TRX", "quote": "USDT"},
+    {"base": "ADA", "quote": "USDT"},
+    {"base": "USDC", "quote": "USDT"},
+    {"base": "ETH", "quote": "BTC"},
+    {"base": "XMR", "quote": "BTC"},
+    {"base": "XRP", "quote": "BTC"},
+    {"base": "LTC", "quote": "BTC"},
+    {"base": "BCH", "quote": "BTC"},
+    {"base": "EOS", "quote": "BTC"},
+    {"base": "XLM", "quote": "BTC"},
+    {"base": "BNB", "quote": "BTC"},
+    {"base": "XTZ", "quote": "BTC"},
+    {"base": "TRX", "quote": "BTC"},
+    {"base": "ADA", "quote": "BTC"}
+  ]
+}
