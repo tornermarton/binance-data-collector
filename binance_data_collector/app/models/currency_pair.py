@@ -6,7 +6,7 @@ __all__ = ["CurrencyPair"]
 import dataclasses
 
 
-@dataclasses.dataclass(frozen=True, eq=True)
+@dataclasses.dataclass(frozen=True)
 class CurrencyPair(object):
     """Class for a currency pair (ticker pair).
 

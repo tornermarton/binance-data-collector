@@ -1,6 +1,5 @@
 {
-  "buffers_root": "/data/buffers",
-  "compressed_root": "/data/compressed",
+  "data_root": "/data",
   "depth": 1000,
   "snapshot_frequency": 60,
   "currency_pairs": [

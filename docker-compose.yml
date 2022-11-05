@@ -1,0 +1,17 @@
+version: "3.5"
+
+services:
+  binance-data-collector:
+    image: tornermarton/binance-data-collector
+    container_name: binance-data-collector
+    hostname: binance-data-collector
+    restart: unless-stopped
+    ports:
+      - "22:37022"
+#    volumes:
+#      - ./data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200k"
+        max-file: "10"

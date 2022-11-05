@@ -1,4 +1,5 @@
-.gitignore
-docker/
-docs/
 venv/
+.gitignore
+.git
+.idea
+docker-compose.yml

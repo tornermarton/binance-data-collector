@@ -1,7 +1,5 @@
 # coding=utf-8
-__all__ = [
-    "JsonFormatter"
-]
+__all__ = ["JsonFormatter"]
 
 import datetime
 import io
