@@ -7,7 +7,7 @@ services:
     hostname: binance-data-collector
     restart: unless-stopped
     ports:
-      - "22:37022"
+      - "37080:3000"
 #    volumes:
 #      - ./data:/data
     logging:

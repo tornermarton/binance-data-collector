@@ -20,7 +20,7 @@ def parse_config_file(path: Path) -> None:
 
 
 @click.group()
-@click.option("--config", type=Path, help="Log to this path.")
+@click.option("--config", type=Path, help="Path to logging config.")
 @click.option("--debug", type=bool, is_flag=True, help="Use debug logging.")
 @click.version_option()
 def cli(config: typing.Optional[Path] = None, debug: bool = False) -> None:

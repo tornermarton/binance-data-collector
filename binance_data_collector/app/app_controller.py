@@ -1,8 +1,7 @@
 # coding=utf-8
 import datetime
 
-
-from binance_data_collector.api import Controller, Get, HTTPException
+from binance_data_collector.api import Controller, Get, Post
 
 from .app_service import AppService
 from .constants import TZ
@@ -34,6 +33,7 @@ class AppController(object):
                         symbol=c.symbol,
                         base=c.base,
                         quote=c.quote,
+                        is_active=self._app_service.is_active(currency_pair=c),
                     )
                     for c in last_change.added
                 ],
@@ -42,6 +42,7 @@ class AppController(object):
                         symbol=c.symbol,
                         base=c.base,
                         quote=c.quote,
+                        is_active=False,
                     )
                     for c in last_change.removed
                 ],
@@ -55,7 +56,12 @@ class AppController(object):
     @Get("currency_pairs")
     def get_currency_pairs(self) -> list[CurrencyPairResponseDTO]:
         return [
-            CurrencyPairResponseDTO(symbol=c.symbol, base=c.base, quote=c.quote)
+            CurrencyPairResponseDTO(
+                symbol=c.symbol,
+                base=c.base,
+                quote=c.quote,
+                is_active=self._app_service.is_active(currency_pair=c),
+            )
             for c in self._app_service.get_currency_pairs()
         ]
 
@@ -65,14 +71,17 @@ class AppController(object):
             symbol=symbol,
         )
 
-        if currency_pair is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"CurrencyPair with symbol [{symbol}] cannot be found",
-            )
-
         return CurrencyPairResponseDTO(
             symbol=currency_pair.symbol,
             base=currency_pair.base,
-            quote=currency_pair.quote
+            quote=currency_pair.quote,
+            is_active=self._app_service.is_active(currency_pair=currency_pair),
         )
+
+    @Post("currency_pairs/{symbol}/activate", status_code=204)
+    def activate_currency_pair(self, symbol: str) -> None:
+        self._app_service.activate_currency_pair(symbol=symbol)
+
+    @Post("currency_pairs/{symbol}/deactivate", status_code=204)
+    def deactivate_currency_pair(self, symbol: str) -> None:
+        self._app_service.deactivate_currency_pair(symbol=symbol)

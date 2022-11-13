@@ -56,9 +56,7 @@ class Subscription(Unsubscribable):
 
     def unsubscribe(self) -> None:
         if self._closed:
-            raise SubscriptionAlreadyClosedException(
-                "Subscription is already closed"
-            )
+            return
 
         if self._on_unsubscribe is not None:
             self._on_unsubscribe()

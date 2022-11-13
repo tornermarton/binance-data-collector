@@ -1,4 +1,6 @@
 # coding=utf-8
+__all__ = ["Application"]
+
 import inspect
 import logging
 import typing
@@ -7,13 +9,17 @@ import fastapi
 import uvicorn
 
 from binance_data_collector.api.constants import (
-    API_METADATA_KEY, CONTROLLER_METADATA_KEY, HTTP_ENDPOINT_METADATA_KEY, INJECTABLE_METADATA_KEY,
-    MODULE_METADATA_KEY
+    API_METADATA_KEY,
+    CONTROLLER_METADATA_KEY,
+    HTTP_ENDPOINT_METADATA_KEY,
+    INJECTABLE_METADATA_KEY,
+    MODULE_METADATA_KEY,
 )
 from .controller import ControllerMetadata
 from .http import HTTPEndpointMetadata
 from .injectable import InjectableMetadata
 from .injection import ClassProvider, FactoryProvider, Inject, ValueProvider
+from .lifecycle import OnDestroy, OnInit
 from .module import ModuleMetadata
 from .types import InjectionToken, ModuleLike
 
@@ -39,26 +45,75 @@ class Application(object):
                 base_path_segments=[]
             )
 
+    def init_components(self, components: list[typing.Any]) -> None:
+        for component in components:
+            if isinstance(component, OnInit):
+                component.on_init()
+
+    def destroy_components(self, components: list[typing.Any]) -> None:
+        for component in components:
+            if isinstance(component, OnDestroy):
+                component.on_destroy()
+
     def listen(self, port: int = 3000) -> None:
+        self.init_components(components=list(self._providers.values()))
+        self.init_components(components=list(self._controllers.values()))
+
         uvicorn.run(
             app=self._app,
+            host="0.0.0.0",
             port=port,
             log_level=logging.INFO,
             log_config=None,
         )
 
-    def get_api_metadata(
+        self.destroy_components(components=list(self._controllers.values()))
+        self.destroy_components(components=list(self._providers.values()))
+
+    def get_api_metadata(self, o: typing.Any, key: str) -> typing.Any:
+        metadata: dict[str, typing.Any] = getattr(o, API_METADATA_KEY)
+
+        return metadata.get(key)
+
+    def get_dependencies(
         self,
-        o: typing.Any,
-        key: str,
-        default: KT | None = None
-    ) -> typing.Union[typing.Any, KT]:
-        metadata: dict[str, typing.Any] = getattr(o, API_METADATA_KEY, default)
+        method: typing.Callable,
+        providers: dict[InjectionToken, typing.Any],
+    ) -> dict[str, typing.Any]:
+        dependencies: dict[str, typing.Any] = {}
 
-        if metadata == default:
-            return default
+        for signature in inspect.signature(method).parameters.values():
+            if signature.name == "self":
+                continue
 
-        return metadata.get(key, default)
+            if isinstance(signature.default, Inject):
+                token: InjectionToken = signature.default.token
+            else:
+                try:
+                    token: typing.Type = signature.annotation.__name__
+                except AttributeError:
+                    # Support `from __future__ import annotations`
+                    # https://docs.python.org/3/library/inspect.html#inspect.signature
+                    token: typing.Type = signature.annotation
+
+            if token not in providers:
+                raise RuntimeError(f"Provider not found for {token}")
+
+            dependencies[signature.name] = providers[token]
+
+        return dependencies
+
+    def instantiate_with_providers(
+        self,
+        class_: typing.Type,
+        providers: dict[InjectionToken, typing.Any],
+    ) -> typing.Any:
+        dependencies: dict[str, typing.Any] = self.get_dependencies(
+            method=class_.__init__,
+            providers=providers
+        )
+
+        return class_(**dependencies)
 
     def create_providers(
         self,
@@ -73,8 +128,10 @@ class Application(object):
 
         for provider in module_metadata.providers:
             if (
-                    isinstance(provider, ValueProvider) or
-                    isinstance(provider, ClassProvider) or
+                    isinstance(provider, ValueProvider)
+                    or
+                    isinstance(provider, ClassProvider)
+                    or
                     isinstance(provider, FactoryProvider)
             ):
                 providers[provider.provide] = provider.get_value()
@@ -84,7 +141,10 @@ class Application(object):
                     key=INJECTABLE_METADATA_KEY,
                 )
 
-                provider: typing.Any = provider()
+                provider: typing.Any = self.instantiate_with_providers(
+                    class_=provider,
+                    providers=providers,
+                )
                 providers[provider.__class__.__name__] = provider
 
         return providers
@@ -98,15 +158,19 @@ class Application(object):
             predicate=inspect.ismethod
         )
 
-        endpoints: list[tuple[typing.Callable, HTTPEndpointMetadata]] = [
-            (
-                method,
-                self.get_api_metadata(o=method, key=HTTP_ENDPOINT_METADATA_KEY)
-            )
-            for _, method in members
-        ]
+        endpoints: list[tuple[typing.Callable, HTTPEndpointMetadata]] = []
+        for _, method in members:
+            try:
+                metadata: HTTPEndpointMetadata = self.get_api_metadata(
+                    o=method,
+                    key=HTTP_ENDPOINT_METADATA_KEY,
+                )
 
-        endpoints = list(filter(lambda x: x[1] is not None, endpoints))
+                endpoints.append((method, metadata))
+            except AttributeError:
+                # No metadata is found for method, it is not an API endpoint
+                pass
+
         endpoints = list(reversed(endpoints))
 
         return endpoints
@@ -141,51 +205,6 @@ class Application(object):
                 tags=controller_path_segments,
                 methods=[metadata.method.name],
             )
-
-    def get_dependencies(
-        self,
-        method: typing.Callable,
-        providers: dict[InjectionToken, typing.Any],
-    ) -> dict[str, typing.Any]:
-        dependencies: dict[str, typing.Any] = {}
-
-        for signature in inspect.signature(method).parameters.values():
-            if signature.name == "self":
-                continue
-
-            if isinstance(signature.default, Inject):
-                token: InjectionToken = signature.default.token
-            else:
-                token: typing.Type = signature.annotation.__name__
-
-            if token not in providers:
-                raise RuntimeError(f"Provider not found for {token}")
-
-            dependencies[signature.name] = providers[token]
-
-        return dependencies
-
-    def get_init_dependencies(
-        self,
-        class_: typing.Any,
-        providers: dict[InjectionToken, typing.Any],
-    ) -> dict[str, typing.Any]:
-        return self.get_dependencies(
-            method=class_.__init__,
-            providers=providers,
-        )
-
-    def instantiate_with_providers(
-        self,
-        class_: typing.Type,
-        providers: dict[InjectionToken, typing.Any],
-    ) -> typing.Any:
-        dependencies: dict[str, typing.Any] = self.get_init_dependencies(
-            class_=class_,
-            providers=providers
-        )
-
-        return class_(**dependencies)
 
     def create_controllers(
         self,
