@@ -21,6 +21,17 @@ class ConfigType(enum.Enum):
     JSON = enum.auto()
 
 
+def load_config(path: Path, config_type: ConfigType) -> dict[str, typing.Any]:
+    text: str = path.read_text()
+
+    if config_type == ConfigType.YAML:
+        return YAML().load(text)
+    elif config_type == ConfigType.JSON:
+        return json.loads(text)
+    else:
+        raise RuntimeError(f"Unsupported config type: `{config_type}`")
+
+
 @Injectable()
 class Config(object):
     @staticmethod
@@ -30,14 +41,10 @@ class Config(object):
     ) -> ValueProvider:
         path = path.resolve()
 
-        config: dict[str, typing.Any] = {}
-
-        if config_type == ConfigType.YAML:
-            config = YAML().load(path.read_text())
-        elif config_type == ConfigType.JSON:
-            config = json.loads(path.read_text())
-        else:
-            raise RuntimeError(f"Unsupported config type: `{config_type}`")
+        config: dict[str, typing.Any] = load_config(
+            path=path,
+            config_type=config_type,
+        )
 
         return ValueProvider(
             provide=Config.__name__,

@@ -1,9 +1,15 @@
 # coding=utf-8
+import datetime
+
 import pydantic
+
+from binance_data_collector.app.models.currency_pair import CurrencyPairStatus
 
 
 class CurrencyPairResponseDTO(pydantic.BaseModel):
-    symbol: str
+    uuid: str
     base: str
     quote: str
-    is_active: bool
+    status: CurrencyPairStatus
+    created_at: datetime.datetime
+    updated_at: datetime.datetime

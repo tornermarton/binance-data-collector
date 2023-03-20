@@ -9,9 +9,9 @@ import click
 from ruamel.yaml import YAML
 
 from binance_data_collector.api import Application
-
 from binance_data_collector.app.app_module import AppModule
-from binance_data_collector.log import DEFAULT_LOGGING_CONFIG
+
+from .constants import DEFAULT_LOGGING_CONFIG
 
 
 def parse_config_file(path: Path) -> None:
@@ -37,6 +37,6 @@ def cli(config: typing.Optional[Path] = None, debug: bool = False) -> None:
 
 @cli.command()
 def start() -> None:
-    app: Application = Application(AppModule)
+    app: Application = Application(module=AppModule)
 
     app.listen(port=3000)

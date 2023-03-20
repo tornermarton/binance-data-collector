@@ -1,5 +1,2 @@
 data_root: "/data"
-data_file_name_pattern: "{name}.{ts}.json.gz"
-default_currency_pair:
-  base: "BTC"
-  quote: "USDT"
+data_file_name_pattern: "{name}_{ts}.json.gz"

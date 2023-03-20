@@ -63,6 +63,10 @@ class DataFileManager(OnDestroy):
 
         self._data_files: dict[str, DataFile] = {}
 
+    def _close_file_by_key(self, key: str) -> None:
+        data_file: DataFile = self._data_files.pop(key)
+        data_file.close()
+
     def get_file(self, currency_pair: CurrencyPair, name: str) -> DataFile:
         key: str = f"{currency_pair.lower()}_{name}"
         ts: datetime.date = datetime.date.today()
@@ -71,9 +75,7 @@ class DataFileManager(OnDestroy):
         with lock:
             if key in self._data_files and ts != self._data_files[key].ts:
                 # close before switch to prevent non-closed io at exception
-                self._data_files[key].close()
-
-                del self._data_files[key]
+                self._close_file_by_key(key=key)
 
             if key not in self._data_files:
                 path: Path = self._data_root / currency_pair.lower() / file_name
@@ -92,12 +94,9 @@ class DataFileManager(OnDestroy):
         with lock:
             if key in self._data_files:
                 # close before switch to prevent non-closed io at exception
-                self._data_files[key].close()
-
-                del self._data_files[key]
+                self._close_file_by_key(key=key)
 
     def on_destroy(self) -> None:
         with lock:
-            for key, data_file in tuple(self._data_files.items()):
-                data_file.close()
-                del self._data_files[key]
+            for key in list(self._data_files.keys()):
+                self._close_file_by_key(key=key)

@@ -2,7 +2,7 @@
 from .application import Application
 from .controller import Controller
 from .exceptions import HTTPException
-from .http import Get, Post, Put, Patch, Delete
+from .http import HttpStatus, Get, Post, Put, Patch, Delete
 from .injection import (
     Inject,
     ValueProvider,
@@ -11,4 +11,6 @@ from .injection import (
 )
 from .injectable import Injectable
 from .module import Module
+from .pipes import ParseUUIDPipe, UUIDVersion
+from .route import Request, Param, Query, Body
 from .types import InjectionToken

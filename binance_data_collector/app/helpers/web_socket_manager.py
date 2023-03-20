@@ -1,6 +1,7 @@
 # coding=utf-8
 import dataclasses
 import enum
+import logging
 import threading
 import typing
 import uuid
@@ -9,15 +10,15 @@ from autobahn.twisted import websocket
 from twisted.internet import protocol, reactor
 from twisted.internet.interfaces import IAddress, IConnector
 
-from binance_data_collector.api.lifecycle import OnDestroy, OnInit
-from binance_data_collector.app.utils import LoggingMixin
 
 try:
     import ujson as json
 except ImportError:
     import json
 
+from binance_data_collector.api.lifecycle import OnDestroy, OnInit
 from binance_data_collector.api import Injectable
+from binance_data_collector.log import LoggingMixin, get_logger_for
 from binance_data_collector.rxpy import Observable, Observer, Subject, Subscription
 
 
@@ -40,12 +41,17 @@ class WebSocketEvent(object):
     context: dict[str, typing.Any] | None = None
 
 
-class WebSocketClientProtocol(LoggingMixin, websocket.WebSocketClientProtocol):
+class WebSocketClientProtocol(websocket.WebSocketClientProtocol):
     def __init__(self) -> None:
         super().__init__()
 
         self._message: Subject[WebSocketMessage] = Subject()
         self._event: Subject[WebSocketEvent] = Subject()
+
+        # self.log is already defined in parent
+        self._logger: logging.Logger = get_logger_for(
+            cls=WebSocketClientProtocol,
+        )
 
     @property
     def messages(self) -> Observable[WebSocketMessage]:
@@ -62,13 +68,13 @@ class WebSocketClientProtocol(LoggingMixin, websocket.WebSocketClientProtocol):
         try:
             self.transport.setTcpKeepAlive(1)
         except AttributeError:
-            self.log.warning("AttributeError silenced at TCP keepalive")
+            self._logger.warning("AttributeError silenced at TCP keepalive")
 
     def _process_payload(self, payload: bytes) -> None:
         try:
             message: dict[str, typing.Any] = json.loads(payload.decode("utf-8"))
 
-            self.log.debug(f"Message received: {message}")
+            self._logger.debug(f"Message received: {message}")
 
             if "stream" in message:
                 symbol, channel, *_ = message["stream"].split('@')
@@ -81,7 +87,7 @@ class WebSocketClientProtocol(LoggingMixin, websocket.WebSocketClientProtocol):
                     ),
                 )
 
-                self.log.debug("Message processed.")
+                self._logger.debug("Message processed.")
             elif "result" in message and message["result"] is None:
                 self._event.next(
                     value=WebSocketEvent(
@@ -90,23 +96,23 @@ class WebSocketClientProtocol(LoggingMixin, websocket.WebSocketClientProtocol):
                     ),
                 )
             else:
-                self.log.warning(f"Unexpected message: {message}")
+                self._logger.warning(f"Unexpected message: {message}")
         except Exception as e:
-            self.log.exception(f"Could not process payload.", exc_info=e)
+            self._logger.exception(f"Could not process payload.", exc_info=e)
 
     def connectionMade(self) -> None:
         super().connectionMade()
 
         self._init_tcp_keepalive()
 
-        self.log.info("WebSocket connected!")
+        self._logger.info("WebSocket connected!")
 
         self._event.next(
             value=WebSocketEvent(type=WebSocketEventType.CONNECTED),
         )
 
     def onClose(self, wasClean: bool, code: int, reason: typing.Any) -> None:
-        self.log.info(
+        self._logger.info(
             f"WebSocket disconnected (code: {code}, reason: {reason})!"
         )
 
@@ -153,39 +159,45 @@ class WebSocketClientFactory(
         if self._protocol_instance is not None:
             self._protocol_instance.send_message(message=message)
 
-    def destroy_subscription(self) -> None:
+    def _destroy_subscriptions(self) -> None:
         for subscription in self._subscriptions:
             subscription.unsubscribe()
 
     def buildProtocol(self, addr: IAddress) -> WebSocketClientProtocol:
         self.resetDelay()
 
-        self.destroy_subscription()
+        self._destroy_subscriptions()
 
         self._protocol_instance = self.protocol()
         self._protocol_instance.factory = self
         self._subscriptions.append(
             self._protocol_instance.messages.subscribe(
-                observer=Observer(
-                    next=lambda message: self._message.next(value=message)
-                ),
-            )
+                on_next=lambda v: self._message.next(value=v),
+            ),
         )
         self._subscriptions.append(
             self._protocol_instance.events.subscribe(
-                observer=Observer(
-                    next=lambda event: self._event.next(value=event)
-                ),
-            )
+                on_next=lambda v: self._event.next(value=v)
+            ),
         )
 
         return self._protocol_instance
+
+    def destroy(self) -> None:
+        self._protocol_instance.sendClose(code=1000)
+
+        self._destroy_subscriptions()
+
+        self._message.complete()
+        self._event.complete()
 
 
 class WebSocketConnection(object):
     def __init__(self, factory: WebSocketClientFactory) -> None:
         self._id: str = str(uuid.uuid4())
         self._factory: WebSocketClientFactory = factory
+
+        self._connector: IConnector | None = None
 
     @property
     def id(self) -> str:
@@ -206,33 +218,39 @@ class WebSocketConnection(object):
     def send_message(self, message: dict[str, typing.Any]) -> None:
         self._factory.send_message(message=message)
 
+    def open(self) -> None:
+        if self._connector is not None:
+            return
+
+        self._connector = websocket.connectWS(factory=self._factory)
+
+    def close(self) -> None:
+        if self._connector is None:
+            return
+
+        self._factory.stopTrying()
+        self._factory.destroy()
+
 
 @Injectable()
-class WebSocketManager(threading.Thread, OnInit, OnDestroy):
+class WebSocketManager(threading.Thread, LoggingMixin, OnInit, OnDestroy):
     def __init__(self) -> None:
         super().__init__()
 
-        self._connectors: dict[str, IConnector] = {}
-
-    def _add_connection(self, connection: WebSocketConnection) -> None:
-        self._connectors[connection.id] = websocket.connectWS(
-            factory=connection.factory,
-        )
+        self._connections: dict[str, WebSocketConnection] = {}
 
     def create_connection(self, url: str) -> WebSocketConnection:
-        connection: WebSocketConnection = WebSocketConnection(
-            factory=WebSocketClientFactory(url=url),
-        )
+        factory: WebSocketClientFactory = WebSocketClientFactory(url=url)
+        connection: WebSocketConnection = WebSocketConnection(factory=factory)
 
-        reactor.callFromThread(self._add_connection, connection)
+        reactor.callFromThread(connection.open)
+        self._connections[connection.id] = connection
 
         return connection
 
-    def remove_connection(self, connection: WebSocketConnection) -> None:
-        connector: IConnector = self._connectors.pop(connection.id)
-
-        connector.factory.reconnect = False
-        connector.disconnect()
+    def delete_connection(self, connection: WebSocketConnection) -> None:
+        reactor.callFromThread(connection.close)
+        self._connections.pop(connection.id, None)
 
     def run(self) -> None:
         reactor.run(installSignalHandlers=False)
@@ -241,9 +259,8 @@ class WebSocketManager(threading.Thread, OnInit, OnDestroy):
         self.start()
 
     def on_destroy(self) -> None:
-        for connector in self._connectors.values():
-            connector.factory.reconnect = False
-            connector.disconnect()
+        for connection in list(self._connections.values()):
+            self.delete_connection(connection=connection)
 
-        reactor.stop()
+        reactor.callFromThread(reactor.stop)
         self.join()

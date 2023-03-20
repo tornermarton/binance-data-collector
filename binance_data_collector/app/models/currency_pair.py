@@ -1,25 +1,35 @@
 # coding=utf-8
-from __future__ import annotations
-
-__all__ = ["CurrencyPair"]
+__all__ = ["CurrencyPair", "CurrencyPairStatus"]
 
 import dataclasses
+import enum
+
+from binance_data_collector.serialization import serializable
+
+from binance_data_collector.app.models.repository import Model
 
 
-@dataclasses.dataclass(frozen=True)
-class CurrencyPair(object):
+class CurrencyPairStatus(enum.Enum):
+    CREATED = "CREATED"
+    ACTIVE = "ACTIVE"
+    IDLE = "IDLE"
+    STOPPED = "STOPPED"
+    RESTORED = "RESTORED"
+    ARCHIVED = "ARCHIVED"
+
+
+@serializable()
+@dataclasses.dataclass(kw_only=True)
+class CurrencyPair(Model):
     """Class for a currency pair (ticker pair).
 
-    Currency pairs compare the value the base currency (first)
-    the quote currency (second).
+    Currency pairs compare the value of the base currency (first) to the quote
+    currency (second).
     """
 
     base: str
     quote: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, str]) -> CurrencyPair:
-        return cls(**data)
+    status: CurrencyPairStatus = CurrencyPairStatus.CREATED
 
     def upper(self, separator: str = '_') -> str:
         return f"{self.base.upper()}{separator}{self.quote.upper()}"

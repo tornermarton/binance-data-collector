@@ -8,6 +8,10 @@ import uuid
 
 T = typing.TypeVar("T")
 
+NextObserver: typing.Type = typing.Callable[[T], None]
+ErrorObserver: typing.Type = typing.Callable[[BaseException], None]
+CompleteObserver: typing.Type = typing.Callable[[], None]
+
 
 class SubscriptionAlreadyClosedException(Exception):
     pass
@@ -19,9 +23,9 @@ class SubjectAlreadyCompletedException(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Observer(typing.Generic[T]):
-    next: typing.Optional[typing.Callable[[T], None]] = None
-    error: typing.Optional[typing.Callable[[BaseException], None]] = None
-    complete: typing.Optional[typing.Callable[[], None]] = None
+    on_next: typing.Optional[NextObserver] = None
+    on_error: typing.Optional[ErrorObserver] = None
+    on_complete: typing.Optional[CompleteObserver] = None
 
 
 class Unsubscribable(metaclass=abc.ABCMeta):
@@ -34,19 +38,23 @@ class Subscribable(typing.Generic[T], metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def subscribe(
         self,
-        observer: typing.Optional[Observer[T]] = None,
+        on_next: typing.Optional[NextObserver] = None,
+        on_error: typing.Optional[ErrorObserver] = None,
+        on_complete: typing.Optional[CompleteObserver] = None,
     ) -> Unsubscribable:
         raise NotImplementedError()
+
+
+UnsubscriptionCallback: typing.Type = typing.Callable[[], typing.Any]
 
 
 class Subscription(Unsubscribable):
     def __init__(
         self,
-        on_unsubscribe: typing.Optional[typing.Callable[[], ...]] = None,
+        on_unsubscribe: typing.Optional[UnsubscriptionCallback] = None,
     ) -> None:
-        self._on_unsubscribe: typing.Optional[
-            typing.Callable[[], ...]
-        ] = on_unsubscribe
+        self._on_unsubscribe: typing.Optional[UnsubscriptionCallback] = \
+            on_unsubscribe
 
         self._closed: bool = False
 
@@ -64,29 +72,33 @@ class Subscription(Unsubscribable):
         self._closed = True
 
 
+SubscriptionCallback: typing.Type = typing.Callable[
+    [
+        typing.Optional[NextObserver],
+        typing.Optional[ErrorObserver],
+        typing.Optional[CompleteObserver],
+    ],
+    typing.Optional[Subscription],
+]
+
+
 class Observable(Subscribable, typing.Generic[T]):
     def __init__(
         self,
-        on_subscribe: typing.Optional[
-            typing.Callable[
-                [typing.Optional[Observer[T]]], typing.Optional[Subscription]
-            ]
-        ] = None,
+        on_subscribe: typing.Optional[SubscriptionCallback] = None,
     ) -> None:
-        self._on_subscribe: typing.Optional[
-            typing.Callable[
-                [typing.Optional[Observer[T]]], typing.Optional[Subscription]
-            ]
-        ] = on_subscribe
+        self._on_subscribe: typing.Optional[SubscriptionCallback] = on_subscribe
 
     def subscribe(
         self,
-        observer: typing.Optional[Observer[T]] = None,
+        on_next: typing.Optional[NextObserver] = None,
+        on_error: typing.Optional[ErrorObserver] = None,
+        on_complete: typing.Optional[CompleteObserver] = None,
     ) -> Subscription:
         subscription: typing.Optional[Subscription] = None
 
         if self._on_subscribe is not None:
-            subscription = self._on_subscribe(observer)
+            subscription = self._on_subscribe(on_next, on_error, on_complete)
 
         if subscription is not None:
             return subscription
@@ -95,46 +107,38 @@ class Observable(Subscribable, typing.Generic[T]):
 
 
 class Subject(Observable, typing.Generic[T]):
-    def __init__(self, value: typing.Optional[T] = None) -> None:
+    def __init__(self) -> None:
         super().__init__()
-
-        self._value: typing.Optional[T] = value
 
         self._completed: bool = False
         self._observers: dict[int, Observer[T]] = {}
 
-    @property
-    def value(self) -> T:
-        return self._value
+    def _check_completed(self) -> None:
+        if self._completed:
+            raise SubjectAlreadyCompletedException()
 
     def next(self, value: T) -> None:
-        if self._completed:
-            raise SubjectAlreadyCompletedException(
-                "Subject is already completed"
-            )
+        self._check_completed()
 
-        self._value = value
-
-        for observer in self._observers.values():
-            if observer is not None and observer.next is not None:
-                observer.next(value)
+        for observer in list(self._observers.values()):
+            if observer is not None and observer.on_next is not None:
+                observer.on_next(value)
 
     def error(self, error: BaseException) -> None:
-        if self._completed:
-            raise SubjectAlreadyCompletedException(
-                "Subject is already completed"
-            )
+        self._check_completed()
 
-        for observer in self._observers.values():
-            if observer is not None and observer.error is not None:
-                observer.error(error)
+        for observer in list(self._observers.values()):
+            if observer is not None and observer.on_error is not None:
+                observer.on_error(error)
 
     def complete(self) -> None:
+        self._check_completed()
+
         self._completed = True
 
-        for observer in self._observers.values():
-            if observer is not None and observer.complete is not None:
-                observer.complete()
+        for observer in list(self._observers.values()):
+            if observer is not None and observer.on_complete is not None:
+                observer.on_complete()
 
     @property
     def observed(self) -> bool:
@@ -145,24 +149,59 @@ class Subject(Observable, typing.Generic[T]):
 
     def subscribe(
         self,
-        observer: typing.Optional[Observer[T]] = None,
+        on_next: typing.Optional[NextObserver] = None,
+        on_error: typing.Optional[ErrorObserver] = None,
+        on_complete: typing.Optional[CompleteObserver] = None,
     ) -> Subscription:
         key: int = uuid.uuid4().int
+        observer: Observer = Observer(
+            on_next=on_next,
+            on_error=on_error,
+            on_complete=on_complete,
+        )
         self._observers[key] = observer
 
         subscription: Subscription = Subscription(
             on_unsubscribe=lambda: self._observers.pop(key),
         )
 
-        if observer is not None and self._value is not None:
-            observer.next(self._value)
-
         return subscription
 
 
+class BehaviorSubject(Subject):
+    def __init__(self, value: T = None) -> None:
+        super().__init__()
+
+        self._value: T = value
+
+    @property
+    def value(self) -> T:
+        return self._value
+
+    def next(self, value: T) -> None:
+        self._value = value
+
+        return super().next(value=value)
+
+    def subscribe(
+        self,
+        on_next: typing.Optional[NextObserver] = None,
+        on_error: typing.Optional[ErrorObserver] = None,
+        on_complete: typing.Optional[CompleteObserver] = None,
+    ) -> Subscription:
+        if on_next is not None:
+            on_next(self._value)
+
+        return super().subscribe(
+            on_next=on_next,
+            on_error=on_error,
+            on_complete=on_complete,
+        )
+
+
 def _empty(observer: typing.Optional[Observer[...]] = None) -> Subscription:
-    if observer is not None and observer.complete is not None:
-        observer.complete()
+    if observer is not None and observer.on_complete is not None:
+        observer.on_complete()
 
     return Subscription()
 

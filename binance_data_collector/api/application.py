@@ -16,19 +16,24 @@ from binance_data_collector.api.constants import (
     MODULE_METADATA_KEY,
 )
 from .controller import ControllerMetadata
-from .http import HTTPEndpointMetadata
+from .http import HttpEndpointMetadata
 from .injectable import InjectableMetadata
 from .injection import ClassProvider, FactoryProvider, Inject, ValueProvider
 from .lifecycle import OnDestroy, OnInit
 from .module import ModuleMetadata
+from .pipes import PipeTransform
+from .route import Body, Param, Query, Request
 from .types import InjectionToken, ModuleLike
-
+from ..serialization import JsonFormatter
 
 KT: typing.TypeVar = typing.TypeVar("KT")
 
+P: typing.ParamSpec = typing.ParamSpec('P')
+R: typing.TypeVar = typing.TypeVar('R')
+
 
 class Application(object):
-    def __init__(self, module: ...) -> None:
+    def __init__(self, module: ModuleLike) -> None:
         self._app: fastapi.FastAPI = fastapi.FastAPI()
 
         self._providers: dict[InjectionToken, typing.Any] = self.create_providers(
@@ -103,6 +108,18 @@ class Application(object):
 
         return dependencies
 
+    def call_with_providers(
+        self,
+        method: typing.Callable,
+        providers: dict[InjectionToken, typing.Any],
+    ) -> typing.Any:
+        dependencies: dict[str, typing.Any] = self.get_dependencies(
+            method=method,
+            providers=providers
+        )
+
+        return method(**dependencies)
+
     def instantiate_with_providers(
         self,
         class_: typing.Type,
@@ -127,41 +144,44 @@ class Application(object):
         )
 
         for provider in module_metadata.providers:
-            if (
-                    isinstance(provider, ValueProvider)
-                    or
-                    isinstance(provider, ClassProvider)
-                    or
-                    isinstance(provider, FactoryProvider)
-            ):
-                providers[provider.provide] = provider.get_value()
+            if isinstance(provider, ValueProvider):
+                providers[provider.provide] = provider.use_value
+            elif isinstance(provider, FactoryProvider):
+                providers[provider.provide] = self.call_with_providers(
+                    method=provider.use_factory,
+                    providers=providers,
+                )
+            elif isinstance(provider, ClassProvider):
+                providers[provider.provide] = self.instantiate_with_providers(
+                    class_=provider.use_class,
+                    providers=providers,
+                )
             else:
                 metadata: InjectableMetadata = self.get_api_metadata(
                     o=provider,
                     key=INJECTABLE_METADATA_KEY,
                 )
 
-                provider: typing.Any = self.instantiate_with_providers(
+                providers[provider.__name__] = self.instantiate_with_providers(
                     class_=provider,
                     providers=providers,
                 )
-                providers[provider.__class__.__name__] = provider
 
         return providers
 
     def get_endpoints(
         self,
         controller: typing.Any
-    ) -> list[tuple[typing.Callable, HTTPEndpointMetadata]]:
+    ) -> list[tuple[typing.Callable, HttpEndpointMetadata]]:
         members: list[tuple[str, typing.Callable]] = inspect.getmembers(
             object=controller,
             predicate=inspect.ismethod
         )
 
-        endpoints: list[tuple[typing.Callable, HTTPEndpointMetadata]] = []
+        endpoints: list[tuple[typing.Callable, HttpEndpointMetadata]] = []
         for _, method in members:
             try:
-                metadata: HTTPEndpointMetadata = self.get_api_metadata(
+                metadata: HttpEndpointMetadata = self.get_api_metadata(
                     o=method,
                     key=HTTP_ENDPOINT_METADATA_KEY,
                 )
@@ -174,6 +194,80 @@ class Application(object):
         endpoints = list(reversed(endpoints))
 
         return endpoints
+
+    def create_endpoint_method(
+        self,
+        method: typing.Callable[P, R],
+        signature: inspect.Signature,
+    ) -> typing.Callable:
+        request_param_name: str | None = None
+        path_param_names: dict[str, str] = {}
+        path_param_pipes: dict[str, list[PipeTransform]] = {}
+        query_param_name: str | None = None
+        query_param_type: typing.Type | None = None
+        query_param_pipes: list[PipeTransform] = []
+        body_param_name: str | None = None
+        body_param_type: typing.Type | None = None
+        body_param_pipes: list[PipeTransform] = []
+
+        for parameter_signature in signature.parameters.values():
+            if parameter_signature.name == "self":
+                continue
+
+            if isinstance(parameter_signature.default, Request):
+                request_param_name = parameter_signature.name
+            if isinstance(parameter_signature.default, Param):
+                path_param_names[parameter_signature.name] = parameter_signature.default.name
+                path_param_pipes[parameter_signature.name] = parameter_signature.default.pipes
+            elif isinstance(parameter_signature.default, Query):
+                query_param_name = parameter_signature.name
+                query_param_type = parameter_signature.annotation
+                query_param_pipes = parameter_signature.default.pipes
+            elif isinstance(parameter_signature.default, Body):
+                body_param_name = parameter_signature.name
+                body_param_type = parameter_signature.annotation
+                body_param_pipes = parameter_signature.default.pipes
+
+        async def endpoint(request: fastapi.Request) -> R:
+            kwargs: dict[str, typing.Any] = {}
+
+            if request_param_name is not None:
+                kwargs[request_param_name] = request
+
+            for signature_name, path_name in path_param_names.items():
+                value: typing.Any = request.path_params[path_name]
+
+                for pipe in path_param_pipes[signature_name]:
+                    value = pipe.transform(value=value)
+
+                kwargs[signature_name] = value
+
+            if query_param_name is not None:
+                value: typing.Any = query_param_type(
+                    **{k: v for k, v in request.query_params.items()}
+                )
+
+                for pipe in query_param_pipes:
+                    value = pipe.transform(value=value)
+
+                kwargs[query_param_name] = value
+
+            if body_param_name is not None:
+                value: typing.Any = JsonFormatter().loadb(
+                    obj=await request.body(),
+                    cls=body_param_type,
+                )
+
+                for pipe in body_param_pipes:
+                    value = pipe.transform(value=value)
+
+                kwargs[body_param_name] = value
+
+            print(kwargs)
+
+            return method(**kwargs)
+
+        return endpoint
 
     def register_endpoints(
         self,
@@ -197,12 +291,19 @@ class Application(object):
             if endpoint_path is not None and endpoint_path != "":
                 path_segments.append(endpoint_path)
 
+            signature: inspect.Signature = inspect.signature(method)
+
+            endpoint_method: typing.Callable = self.create_endpoint_method(
+                method=method,
+                signature=signature,
+            )
+
             self._app.router.add_api_route(
                 path='/' + '/'.join(path_segments),
-                endpoint=method,
-                response_model=inspect.signature(method).return_annotation,
+                endpoint=endpoint_method,
+                response_model=signature.return_annotation,
                 status_code=metadata.status_code,
-                tags=controller_path_segments,
+                tags=metadata.tags,
                 methods=[metadata.method.name],
             )
 

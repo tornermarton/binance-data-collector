@@ -1,5 +1,5 @@
 # coding=utf-8
-from .json_formatter import JsonFormatter
+__all__ = ["DEFAULT_LOGGING_CONFIG"]
 
 DEFAULT_LOGGING_CONFIG = """
 version: 1
@@ -15,7 +15,7 @@ handlers:
     formatter: json_formatter
 formatters:
   json_formatter:
-    '()': binance_data_collector.log.json_formatter.JsonFormatter
+    '()': binance_data_collector.log.JsonLoggingFormatter
     fields:
       - levelname
       - name
