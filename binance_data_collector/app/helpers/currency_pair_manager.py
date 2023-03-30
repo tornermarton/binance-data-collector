@@ -1,4 +1,6 @@
 # coding=utf-8
+from __future__ import annotations
+
 __all__ = ["CurrencyPairManager"]
 
 import datetime
@@ -10,6 +12,7 @@ from binance_data_collector.api.lifecycle import OnDestroy, OnInit
 from binance_data_collector.app.constants import REPOSITORY_TOKEN, TZ
 from binance_data_collector.app.helpers.data_collector import DataCollector
 from binance_data_collector.app.models.repository import Repository
+from binance_data_collector.environments import environment
 from binance_data_collector.log import LoggingMixin
 
 from binance_data_collector.app.models.currency_pair import CurrencyPair, CurrencyPairStatus
@@ -60,7 +63,7 @@ class CurrencyPairManager(threading.Thread, LoggingMixin, OnInit, OnDestroy):
 
         return threshold > last_message_dt
 
-    def _update(self) -> None:
+    def _refresh(self) -> None:
         try:
             # use symbol dict to allow O(1) lookup
             new_currency_pairs: dict[str, CurrencyPair] = {
@@ -94,16 +97,32 @@ class CurrencyPairManager(threading.Thread, LoggingMixin, OnInit, OnDestroy):
                     self._repository.update(uuid=cp.uuid, item=cp)
 
     def run(self) -> None:
-        counter: int = 0
+        sleep_duration_s: int = 5
+
+        refresh_period_s: int = 60
+        refresh_counter_start: int = refresh_period_s // sleep_duration_s
+
+        snapshot_period_s: int = environment.snapshot_period_s
+        snapshot_counter_start = snapshot_period_s // sleep_duration_s
+
+        refresh_counter: int = 0
+        snapshot_counter: int = 0
 
         while not self._stopped:
-            if counter <= 0:
-                self._update()
+            if refresh_counter <= 0:
+                self._refresh()
 
-                counter = (5 * 60)
+                refresh_counter = refresh_counter_start
 
-            counter -= 5
-            time.sleep(5)
+            if snapshot_counter <= 0:
+                self._data_collector.create_snapshot()
+
+                snapshot_counter = snapshot_counter_start
+
+            refresh_counter -= 1
+            snapshot_counter -= 1
+
+            time.sleep(sleep_duration_s)
 
     def on_init(self) -> None:
         self.start()

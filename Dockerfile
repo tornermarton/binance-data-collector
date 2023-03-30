@@ -18,6 +18,8 @@ RUN mkdir /app /data
 COPY . /app
 RUN cd /app && make install
 
+ENV DATA_ROOT /data
+
 EXPOSE 3000
 
 CMD ["binance_data_collector", "start"]

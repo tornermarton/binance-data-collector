@@ -42,7 +42,6 @@ class AppController(object):
         self,
         query: CurrencyPairsQueryDTO = Query(),
     ) -> list[CurrencyPairResponseDTO]:
-
         currency_pairs: list[CurrencyPair] = \
             self._app_service.get_currency_pairs(query=query.dict())
 

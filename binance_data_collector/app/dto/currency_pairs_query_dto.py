@@ -1,4 +1,6 @@
 # coding=utf-8
+from __future__ import annotations
+
 import pydantic
 
 from binance_data_collector.app.models.currency_pair import CurrencyPairStatus

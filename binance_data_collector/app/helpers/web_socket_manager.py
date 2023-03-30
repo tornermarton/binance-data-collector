@@ -1,4 +1,6 @@
 # coding=utf-8
+from __future__ import annotations
+
 import dataclasses
 import enum
 import logging
@@ -19,7 +21,7 @@ except ImportError:
 from binance_data_collector.api.lifecycle import OnDestroy, OnInit
 from binance_data_collector.api import Injectable
 from binance_data_collector.log import LoggingMixin, get_logger_for
-from binance_data_collector.rxpy import Observable, Observer, Subject, Subscription
+from binance_data_collector.rxpy import Observable, Subject, Subscription
 
 
 @dataclasses.dataclass(frozen=True)

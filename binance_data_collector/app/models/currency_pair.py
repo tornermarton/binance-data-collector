@@ -20,7 +20,7 @@ class CurrencyPairStatus(enum.Enum):
 
 @serializable()
 @dataclasses.dataclass(kw_only=True)
-class CurrencyPair(Model):
+class CurrencyPair(Model):  # noqa
     """Class for a currency pair (ticker pair).
 
     Currency pairs compare the value of the base currency (first) to the quote

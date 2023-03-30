@@ -1,4 +1,6 @@
 # coding=utf-8
+from __future__ import annotations
+
 import datetime
 import threading
 import typing
@@ -34,9 +36,11 @@ class FileMockRepository(typing.Generic[T], Repository[T]):
 
             text: str = self._path.read_text()
 
+            class_: typing.Type = getattr(self, "__orig_class__")
+
             self._entries: dict[str, T] = self._formatter.loads(
                 obj=text,
-                cls=dict[str, typing.get_args(self.__orig_class__)[0]],
+                cls=dict[str, typing.get_args(class_)[0]],
             )
 
     def _update_file(self) -> None:

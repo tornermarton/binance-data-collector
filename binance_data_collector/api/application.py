@@ -263,8 +263,6 @@ class Application(object):
 
                 kwargs[body_param_name] = value
 
-            print(kwargs)
-
             return method(**kwargs)
 
         return endpoint

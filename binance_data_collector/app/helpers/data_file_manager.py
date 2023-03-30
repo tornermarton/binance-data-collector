@@ -7,13 +7,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from binance_data_collector.environments import environment
+
 try:
     import ujson as json
 except ImportError:
     import json
 
 from binance_data_collector.api import Injectable
-from binance_data_collector.api.config import Config
 from binance_data_collector.api.lifecycle import OnDestroy
 
 from binance_data_collector.app.models.currency_pair import CurrencyPair
@@ -57,9 +58,9 @@ class DataFile(object):
 
 @Injectable()
 class DataFileManager(OnDestroy):
-    def __init__(self, config: Config) -> None:
-        self._data_root: Path = Path(config.get("data_root")).resolve()
-        self._pattern: str = config.get("data_file_name_pattern")
+    def __init__(self) -> None:
+        self._data_root: Path = Path(environment.data_root).resolve()
+        self._pattern: str = environment.data_file_name_pattern
 
         self._data_files: dict[str, DataFile] = {}
 

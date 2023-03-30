@@ -1,4 +1,6 @@
 # coding=utf-8
+from __future__ import annotations
+
 __all__ = ["DataCollector"]
 
 import dataclasses
@@ -201,6 +203,10 @@ class DataCollector(LoggingMixin, OnDestroy):
         self._currency_pairs.pop(currency_pair.symbol)
         self._data_file_manager.close_file(
             currency_pair=currency_pair,
+            name="snapshot",
+        )
+        self._data_file_manager.close_file(
+            currency_pair=currency_pair,
             name="trade",
         )
         self._data_file_manager.close_file(
@@ -214,6 +220,34 @@ class DataCollector(LoggingMixin, OnDestroy):
                 self._unsubscribe_symbol(symbol=currency_pair.symbol)
         else:
             self._disconnect()
+
+    def _fetch_snapshot_for(self, currency_pair: CurrencyPair) -> dict[str, typing.Any]:
+        symbol: str = currency_pair.upper('')
+        url: str = f"https://api.binance.com/api/v3/depth?symbol={symbol}&limit=1000"
+
+        response: requests.Response = requests.get(url=url)
+
+        return response.json()
+
+    def create_snapshot(self) -> None:
+        for currency_pair_info in self._currency_pairs.values():
+            currency_pair: CurrencyPair = currency_pair_info.value
+            try:
+                data: dict[str, typing.Any] = self._fetch_snapshot_for(
+                    currency_pair=currency_pair,
+                )
+
+                self._data_file_manager.get_file(
+                    currency_pair=currency_pair,
+                    name="snapshot",
+                ).write_data(
+                    data=data,
+                )
+            except Exception as e:
+                self.log.exception(
+                    f"Could not snapshot symbol [{currency_pair.symbol}]",
+                    exc_info=e,
+                )
 
     def get_last_message_dt_for(
         self,

@@ -1,5 +1,5 @@
 # coding=utf-8
-__all__ = ["LoggingMixin", "JsonLoggingFormatter"]
+__all__ = ["get_logger_for", "LoggingMixin", "JsonLoggingFormatter"]
 
 import datetime
 import io

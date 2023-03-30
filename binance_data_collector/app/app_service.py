@@ -1,4 +1,6 @@
 # coding=utf-8
+from __future__ import annotations
+
 import typing
 
 from binance_data_collector.api import HTTPException, Inject, Injectable
