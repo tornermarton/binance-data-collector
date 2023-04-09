@@ -6,6 +6,7 @@ __all__ = ["DataCollector"]
 import dataclasses
 import datetime
 import threading
+import time
 import typing
 
 import requests
@@ -236,6 +237,8 @@ class DataCollector(LoggingMixin, OnDestroy):
                 data: dict[str, typing.Any] = self._fetch_snapshot_for(
                     currency_pair=currency_pair,
                 )
+
+                data["time"] = time.time_ns()
 
                 self._data_file_manager.get_file(
                     currency_pair=currency_pair,
